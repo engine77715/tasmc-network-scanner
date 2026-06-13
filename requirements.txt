@@ -1,0 +1,3 @@
+rich
+wmi
+pywin32
