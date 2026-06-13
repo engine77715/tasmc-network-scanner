@@ -1,21 +1,13 @@
 # TASMC Network Scanner
 
-Python-based network inventory scanner.
+Network scanner for Windows IT environments.
 
-## Features
+Features:
+- ICMP host discovery
+- Hostname resolution
+- Ping status
+- Excel export
+- VLAN scanning
 
-* VLAN scanning
-* Hostname resolution
-* Ping monitoring
-* Online/Offline status
-* Future WMI integration
-* Future Excel export
-* Future GUI application
-
-## Requirements
-
-Python 3.13+
-
-## Author
-
+Author:
 Igor Tarashansky

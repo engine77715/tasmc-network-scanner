@@ -10,16 +10,47 @@ from rich.table import Table
 console = Console()
 results = []
 
+vlans = {
+    "150": "10.101.150.",
+    "110": "10.101.110.",
+    "118": "10.101.118.",
+    "113": "10.101.113."
+}
 
+console.print("[cyan]Available VLANs:[/cyan]")
 
+for vlan in vlans:
+    console.print(f" - {vlan}")
 
-network = "10.101.150."
+console.print(" - ALL")
 
+selected_vlan = input("Select VLAN: ")
+
+if selected_vlan not in vlans and selected_vlan.upper() != "ALL":
+    console.print("[red]Invalid VLAN[/red]")
+    exit()
+
+if selected_vlan.upper() != "ALL":
+    network = vlans[selected_vlan]
+
+if selected_vlan.upper() == "ALL":
+    results = []
+
+    for vlan_name, network in vlans.items():
+        console.print(f"[yellow]Scanning VLAN {vlan_name}[/yellow]")
+
+        vlan_results = scan_network(network)
+
+        for row in vlan_results:
+            results.append(row)
+
+    selected_vlan = "ALL"
 console.print("[cyan]Scanning network...[/cyan]")
 
-results = scan_network(network)
+if selected_vlan.upper() != "ALL":
+    results = scan_network(network)
 
-table = Table(title="VLAN 150 Scan")
+table = Table(title=f"VLAN {selected_vlan} Scan")
 
 table.add_column("IP", style="cyan")
 table.add_column("Hostname", style="green")
@@ -27,7 +58,13 @@ table.add_column("Ping", style="yellow")
 table.add_column("Status")
 
 for ip, host, ping_ms, status in results:
-    table.add_row(ip, host, ping_ms, status)
+
+    if status == "ONLINE":
+        status_color = "[green]ONLINE[/green]"
+    else:
+        status_color = "[red]OFFLINE[/red]"
+
+    table.add_row(ip, host, ping_ms, status_color)
 
 console.print(table)
 
