@@ -1,3 +1,5 @@
+from exporter import export_to_excel
+
 import subprocess
 import socket
 from concurrent.futures import ThreadPoolExecutor
@@ -49,3 +51,9 @@ for ip, host, status in results:
 
 console.print(table)
 console.print(f"[yellow]Found hosts: {len(results)}[/yellow]")
+
+file = export_to_excel(results)
+
+console.print(
+    f"[green]Excel saved:[/green] {file}"
+)
