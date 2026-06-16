@@ -69,7 +69,44 @@ def search_results(event=None):
             tree.see(item)
             break
 
+def show_host_info(event):
 
+    selected = tree.focus()
+
+    if not selected:
+        return
+
+    values = tree.item(selected)["values"]
+
+    ip = values[0]
+    hostname = values[1]
+    ping = values[2]
+    status = values[3]
+
+    info_window = tk.Toplevel(root)
+
+    info_window.title("Host Information")
+    info_window.geometry("400x250")
+
+    tk.Label(
+        info_window,
+        text=f"IP: {ip}"
+    ).pack(pady=10)
+
+    tk.Label(
+        info_window,
+        text=f"Hostname: {hostname}"
+    ).pack(pady=10)
+
+    tk.Label(
+        info_window,
+        text=f"Ping: {ping}"
+    ).pack(pady=10)
+
+    tk.Label(
+        info_window,
+        text=f"Status: {status}"
+    ).pack(pady=10)
 def start_scan():
     threading.Thread(
         target=run_scan,
@@ -129,7 +166,6 @@ def run_scan():
         text=f"Completed - Found {len(results)} hosts"
     )
     print(f"Found {len(results)} hosts")
-
 
     status_label.config(
         text=f"Scan completed. Found {len(results)} hosts"
@@ -199,8 +235,15 @@ progress = ttk.Progressbar(
 )
 
 progress.pack(pady=5)
+table_frame = tk.Frame(root)
+table_frame.pack(
+    fill="both",
+    expand=True,
+    padx=10,
+    pady=10
+)
 tree = ttk.Treeview(
-    root,
+    table_frame,
     columns=("IP", "Hostname", "Ping", "Status"),
     show="headings"
 )
@@ -233,8 +276,36 @@ tree.column("Hostname", width=350)
 tree.column("Ping", width=80)
 tree.column("Status", width=100)
 
-tree.pack(fill="both", expand=True, padx=10, pady=10)
-tree.tag_configure("online", foreground="green")
-tree.tag_configure("offline", foreground="red")
+tree.pack(
+    side="left",
+    fill="both",
+    expand=True
+)
+
+scrollbar = ttk.Scrollbar(
+    table_frame,
+    orient="vertical",
+    command=tree.yview
+)
+
+scrollbar.pack(
+    side="right",
+    fill="y"
+)
+
+tree.configure(
+    yscrollcommand=scrollbar.set
+)
+tree.tag_configure(
+    "online",
+    foreground="darkgreen",
+    background="#e8ffe8"
+)
+
+tree.tag_configure(
+    "offline",
+    foreground="red",
+    background="#ffe8e8"
+)
 
 root.mainloop()
