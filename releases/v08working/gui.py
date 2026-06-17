@@ -180,8 +180,8 @@ def apply_theme(theme_name):
 
     tree.tag_configure("online",  foreground=t["online_fg"],  background=t["online_bg"])
     tree.tag_configure("offline", foreground=t["offline_fg"], background=t["offline_bg"])
-    theme_btn.configure(text="☀️ Light Mode" if theme_name == "Dark" else "🌙 Dark Mode")
-    tb_theme_btn.configure(text="☀️" if theme_name == "Dark" else "🌙")
+    theme_btn.configure(text="Light Mode" if theme_name == "Dark" else "Dark Mode")
+    tb_theme_btn.configure(text="Light" if theme_name == "Dark" else "Dark")
 
 def toggle_theme():
     apply_theme("Dark" if current_theme == "Light" else "Light")
@@ -217,7 +217,7 @@ def search_results(event=None):
 def stop_scan():
     _stop_flag.set()
     tb_stop_btn.configure(state="disabled")
-    status_label.configure(text="⏹ Scan stopped by user")
+    status_label.configure(text="Scan stopped by user")
 
 def copy_online_ips():
     online = [r[0] for r in results if r[3] == "ONLINE"]
@@ -244,7 +244,6 @@ def action_netuse(ip, hostname):
     os.system(f'start cmd /k "net use \\\\{hostname} && echo. && echo Connected to {hostname} && cmd"')
 
 def action_unc(hostname):
-    # пробуем os.startfile, при ошибке — explorer как fallback
     try:
         os.startfile(f"\\\\{hostname}\\c$")
     except Exception:
@@ -255,11 +254,23 @@ def action_unc(hostname):
                 "UNC Error",
                 f"Cannot open  \\\\{hostname}\\c$\n\n"
                 f"Possible reasons:\n"
-                f"  • Host is offline or unreachable\n"
-                f"  • File sharing is disabled\n"
-                f"  • Firewall blocking SMB (port 445)\n\n"
+                f"  - Host is offline or unreachable\n"
+                f"  - File sharing is disabled\n"
+                f"  - Firewall blocking SMB (port 445)\n\n"
                 f"Try Net Use first to authenticate.\n\n"
                 f"Details: {e}")
+
+def action_dameware(ip):
+    dw_path = r"C:\Program Files (x86)\SolarWinds\DameWare Remote Support\DWRCC.exe"
+    try:
+        subprocess.Popen([dw_path, "-c", "-m:" + ip])
+    except FileNotFoundError:
+        messagebox.showerror(
+            "DameWare Error",
+            f"DWRCC.exe not found at:\n{dw_path}\n\n"
+            f"Check DameWare installation path.")
+    except Exception as e:
+        messagebox.showerror("DameWare Error", str(e))
 
 def action_compmgmt(hostname):
     os.system(f'mmc compmgmt.msc /computer:{hostname}')
@@ -275,7 +286,7 @@ def action_unjoin_domain(hostname, win_parent):
     t = THEMES[current_theme]
 
     cred_win = tk.Toplevel(win_parent)
-    cred_win.title(f"Unjoin Domain — {hostname}")
+    cred_win.title(f"Unjoin Domain - {hostname}")
     cred_win.geometry("420x320")
     cred_win.resizable(False, False)
     cred_win.configure(bg=t["bg"])
@@ -283,7 +294,7 @@ def action_unjoin_domain(hostname, win_parent):
 
     hdr = tk.Frame(cred_win, bg="#3a1a1a", pady=10)
     hdr.pack(fill="x")
-    tk.Label(hdr, text="🔓  Remove PC from Domain",
+    tk.Label(hdr, text="Remove PC from Domain",
              font=("Segoe UI", 11, "bold"),
              bg="#3a1a1a", fg="#ff6b6b").pack()
     tk.Label(hdr, text=f"Target: {hostname}",
@@ -324,7 +335,7 @@ def action_unjoin_domain(hostname, win_parent):
         workgroup = wg_entry.get().strip() or "WORKGROUP"
 
         if not username or not password:
-            result_label.configure(text="❌ Username and password required",
+            result_label.configure(text="Username and password required",
                                    fg=t["offline_fg"])
             return
 
@@ -332,11 +343,11 @@ def action_unjoin_domain(hostname, win_parent):
                 "Confirm Unjoin",
                 f"Remove  {hostname}  from domain\n"
                 f"and join workgroup  '{workgroup}'?\n\n"
-                f"⚠️  The PC will reboot automatically!",
+                f"The PC will reboot automatically!",
                 parent=cred_win):
             return
 
-        btn_ok.configure(state="disabled", text="⏳ Working...")
+        btn_ok.configure(state="disabled", text="Working...")
         result_label.configure(text="Executing PowerShell...",
                                 fg=t["status_fg"])
         cred_win.update()
@@ -351,7 +362,7 @@ def action_unjoin_domain(hostname, win_parent):
     btn_row = tk.Frame(cred_win, bg=t["bg"])
     btn_row.pack(pady=6)
 
-    btn_ok = tk.Button(btn_row, text="🔓 Remove from Domain",
+    btn_ok = tk.Button(btn_row, text="Remove from Domain",
                        bg="#cc4400", fg="#ffffff",
                        font=("Segoe UI", 10, "bold"),
                        relief="flat", cursor="hand2",
@@ -379,39 +390,36 @@ def _do_unjoin_thread(hostname, username, password,
             f"Start-Sleep -Seconds 2; "
             f"Restart-Computer -ComputerName '{hostname}' -Force"
         )
-
         result = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive",
              "-Command", ps_script],
-            capture_output=True, text=True, timeout=45
-        )
+            capture_output=True, text=True, timeout=45)
 
         stdout = result.stdout.strip()
         stderr = result.stderr.strip()
 
         if result.returncode == 0 or "HasSucceeded" in stdout:
-            text  = f"✅ Success!\n{hostname} removed from domain.\nRebooting in 2 seconds..."
+            text  = f"Success!\n{hostname} removed from domain.\nRebooting in 2 seconds..."
             color = "darkgreen"
             result_label.after(4000, cred_win.destroy)
         else:
             err   = stderr or stdout or "Unknown error"
             err   = err.split("\n")[0][:150]
-            text  = f"❌ Failed:\n{err}"
+            text  = f"Failed:\n{err}"
             color = "#ff6b6b"
             btn_ok.after(0, lambda: btn_ok.configure(
-                state="normal", text="🔓 Remove from Domain"))
+                state="normal", text="Remove from Domain"))
 
     except subprocess.TimeoutExpired:
-        text  = "⏱ Timeout — PowerShell took too long"
+        text  = "Timeout - PowerShell took too long"
         color = "#ff6b6b"
         btn_ok.after(0, lambda: btn_ok.configure(
-            state="normal", text="🔓 Remove from Domain"))
+            state="normal", text="Remove from Domain"))
     except Exception as e:
-        err   = str(e)
-        text  = f"❌ Error: {err}"
+        text  = f"Error: {str(e)}"
         color = "#ff6b6b"
         btn_ok.after(0, lambda: btn_ok.configure(
-            state="normal", text="🔓 Remove from Domain"))
+            state="normal", text="Remove from Domain"))
 
     result_label.after(0, lambda: result_label.configure(text=text, fg=color))
 
@@ -424,14 +432,14 @@ def fetch_user(ip, label, t):
         output = result.stdout.strip()
         if result.returncode != 0 or not output:
             stderr = result.stderr.strip().lower()
-            text  = "🔒 Access Denied" if ("access" in stderr or "denied" in stderr) \
-                    else "👻 No users logged in"
+            text  = "Access Denied" if ("access" in stderr or "denied" in stderr) \
+                    else "No users logged in"
             color = t["offline_fg"]
         else:
             lines = [l for l in output.splitlines()
                      if l.strip() and not l.strip().upper().startswith("USERNAME")]
             if not lines:
-                text, color = "👻 No users logged in", t["offline_fg"]
+                text, color = "No users logged in", t["offline_fg"]
             else:
                 users = []
                 for line in lines:
@@ -439,12 +447,12 @@ def fetch_user(ip, label, t):
                     username = parts[0].lstrip(">") if parts else "?"
                     state    = parts[3] if len(parts) > 3 else "?"
                     logon    = " ".join(parts[5:]) if len(parts) > 5 else "?"
-                    users.append(f"✅  {username}   [{state}]   logon: {logon}")
+                    users.append(f"{username}   [{state}]   logon: {logon}")
                 text, color = "\n".join(users), t["online_fg"]
     except subprocess.TimeoutExpired:
-        text, color = "⏱ Timeout", t["offline_fg"]
+        text, color = "Timeout", t["offline_fg"]
     except FileNotFoundError:
-        text, color = "❌ 'query' not found", t["offline_fg"]
+        text, color = "'query' not found", t["offline_fg"]
     except Exception as e:
         text, color = f"Error: {e}", t["offline_fg"]
     label.after(0, lambda: label.configure(text=text, fg=color))
@@ -470,7 +478,7 @@ def fetch_printers(ip, tree_widget, status_lbl, t):
                 break
 
         if not header:
-            err_txt = "❌ No printers or access denied"
+            err_txt = "No printers or access denied"
             status_lbl.after(0, lambda: status_lbl.configure(
                 text=err_txt, fg=t["offline_fg"]))
             return
@@ -490,7 +498,7 @@ def fetch_printers(ip, tree_widget, status_lbl, t):
                     continue
                 try:
                     default     = line[col_default:col_name].strip()
-                    default     = "✅" if default.upper() == "TRUE" else ""
+                    default     = "YES" if default.upper() == "TRUE" else ""
                     name        = line[col_name:col_portname].strip()
                     port        = line[col_portname:col_workoff].strip()
                     offline_val = line[col_workoff:].strip()
@@ -502,15 +510,15 @@ def fetch_printers(ip, tree_widget, status_lbl, t):
                     continue
             count = len(tree_widget.get_children())
             if count == 0:
-                status_lbl.configure(text="👻 No printers found", fg=t["offline_fg"])
+                status_lbl.configure(text="No printers found", fg=t["offline_fg"])
             else:
-                status_lbl.configure(text=f"🖨️ Found {count} printer(s)", fg=t["online_fg"])
+                status_lbl.configure(text=f"Found {count} printer(s)", fg=t["online_fg"])
 
         status_lbl.after(0, update)
 
     except subprocess.TimeoutExpired:
         status_lbl.after(0, lambda: status_lbl.configure(
-            text="⏱ Timeout", fg=t["offline_fg"]))
+            text="Timeout", fg=t["offline_fg"]))
     except Exception as e:
         err = str(e)
         status_lbl.after(0, lambda: status_lbl.configure(
@@ -518,7 +526,8 @@ def fetch_printers(ip, tree_widget, status_lbl, t):
 
 # ── fetch: system info ────────────────────────────────────────────────────────
 def fetch_system_info(ip, text_widget, status_lbl, t):
-    def run_wmic(args, skip_headers):
+
+    def run_wmic_simple(args, skip_headers):
         try:
             r = subprocess.run(["wmic", f"/node:{ip}"] + args,
                                capture_output=True, text=True, timeout=12,
@@ -530,36 +539,137 @@ def fetch_system_info(ip, text_widget, status_lbl, t):
         except Exception:
             return "N/A"
 
-    os_info   = run_wmic(["os", "get", "Caption,Version"], ["Caption", "Version"])
-    boot_time = run_wmic(["os", "get", "LastBootUpTime"],  ["LastBootUpTime"])
-    computer  = run_wmic(["computersystem", "get", "Model,Manufacturer"],
-                         ["Model", "Manufacturer"])
-    serial    = run_wmic(["bios", "get", "SerialNumber"],  ["SerialNumber"])
+    os_info   = run_wmic_simple(["os", "get", "Caption,Version"],
+                                ["Caption", "Version"])
+    boot_time = run_wmic_simple(["os", "get", "LastBootUpTime"],
+                                ["LastBootUpTime"])
+    computer  = run_wmic_simple(["computersystem", "get", "Model,Manufacturer"],
+                                ["Model", "Manufacturer"])
+    serial    = run_wmic_simple(["bios", "get", "SerialNumber"],
+                                ["SerialNumber"])
+    bios_ver  = run_wmic_simple(["bios", "get", "SMBIOSBIOSVersion"],
+                                ["SMBIOSBIOSVersion"])
 
+    # ── CPU ───────────────────────────────────────────────────────────────────
+    cpu_info = "N/A"
+    try:
+        r = subprocess.run(
+            ["wmic", f"/node:{ip}", "cpu", "get",
+             "Name,NumberOfCores,MaxClockSpeed"],
+            capture_output=True, text=True, timeout=12,
+            encoding="utf-8", errors="replace")
+        lines = [l.rstrip() for l in r.stdout.splitlines()]
+        lines = [l.lstrip('\ufeff') for l in lines if l.strip()]
+        header = next((l for l in lines if "Name" in l and "NumberOfCores" in l), None)
+        if header:
+            header_idx   = lines.index(header)
+            col_mhz      = header.index("MaxClockSpeed")
+            col_cores    = header.index("NumberOfCores")
+            # Name — после всех остальных колонок (wmic сортирует по алфавиту)
+            # MaxClockSpeed < Name < NumberOfCores в алфавитном порядке
+            # Поэтому Name идёт между MaxClockSpeed и NumberOfCores
+            col_name_end = col_cores  # Name заканчивается там где начинается NumberOfCores
+            col_name     = col_mhz + len("MaxClockSpeed")
+            # Найдём точное начало Name из заголовка
+            tmp = header[:col_cores]  # берём часть до NumberOfCores
+            # Name начинается после MaxClockSpeed
+            name_start = col_mhz + len("MaxClockSpeed")
+            # найдём первый непробельный символ после MaxClockSpeed
+            while name_start < col_cores and header[name_start] == " ":
+                name_start += 1
+            for line in lines[header_idx+1:]:
+                if not line.strip():
+                    continue
+                try:
+                    mhz   = line[col_mhz:name_start].strip()
+                    name  = line[name_start:col_cores].strip()
+                    cores = line[col_cores:].strip().split()[0] if line[col_cores:].strip() else "?"
+                    ghz   = f"{int(mhz)/1000:.1f}" if mhz.isdigit() else "?"
+                    if name:
+                        cpu_info = f"{name}  ({cores} cores, {ghz} GHz)"
+                        break
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    # ── RAM ───────────────────────────────────────────────────────────────────
+    ram_info = "N/A"
+    try:
+        r = subprocess.run(
+            ["wmic", f"/node:{ip}", "memorychip", "get", "Capacity"],
+            capture_output=True, text=True, timeout=12,
+            encoding="utf-8", errors="replace")
+        total_bytes = 0
+        for line in r.stdout.splitlines():
+            line = line.strip().lstrip('\ufeff')
+            if line.isdigit():
+                total_bytes += int(line)
+        if total_bytes > 0:
+            ram_info = f"{total_bytes // (1024**3)} GB"
+    except Exception:
+        pass
+
+    # ── GPU ───────────────────────────────────────────────────────────────────
+    gpu_info = "N/A"
+    try:
+        r = subprocess.run(
+            ["wmic", f"/node:{ip}", "path",
+             "win32_videocontroller", "get", "Name"],
+            capture_output=True, text=True, timeout=12,
+            encoding="utf-8", errors="replace")
+        for line in r.stdout.splitlines():
+            line = line.strip().lstrip('\ufeff')
+            if line and line != "Name":
+                gpu_info = line
+                break
+    except Exception:
+        pass
+
+    # ── диски ─────────────────────────────────────────────────────────────────
     disks_fmt = []
     try:
         r = subprocess.run(
             ["wmic", f"/node:{ip}", "logicaldisk",
-             "get", "DeviceID,Size,FreeSpace"],
+             "get", "DeviceID,FreeSpace,Size"],
             capture_output=True, text=True, timeout=12,
             encoding="utf-8", errors="replace")
-        for l in r.stdout.splitlines():
-            l = l.strip().lstrip('\ufeff')
-            if not l or l.startswith("DeviceID"):
-                continue
-            parts = l.split()
-            if len(parts) >= 3:
+        lines = [l.rstrip() for l in r.stdout.splitlines()]
+        lines = [l.lstrip('\ufeff') for l in lines if l.strip()]
+        header = None
+        header_idx = 0
+        for i, line in enumerate(lines):
+            if "DeviceID" in line and "FreeSpace" in line:
+                header = line
+                header_idx = i
+                break
+        if header:
+            col_did  = header.index("DeviceID")
+            col_free = header.index("FreeSpace")
+            col_size = header.index("Size")
+            for line in lines[header_idx+1:]:
+                if not line.strip():
+                    continue
                 try:
-                    free  = int(parts[0]) // (1024**3)
-                    did   = parts[1]
-                    total = int(parts[2]) // (1024**3)
-                    pct   = int((total - free) / total * 100) if total > 0 else 0
-                    bar   = "█" * (pct // 10) + "░" * (10 - pct // 10)
+                    did  = line[col_did:col_free].strip()
+                    free = line[col_free:col_size].strip()
+                    size = line[col_size:].strip()
+                    if not did or not size:
+                        continue
+                    free_gb  = int(free) // (1024**3) if free.isdigit() else 0
+                    total_gb = int(size) // (1024**3) if size.isdigit() else 0
+                    used_gb  = total_gb - free_gb
+                    pct      = int(used_gb / total_gb * 100) if total_gb > 0 else 0
+                    bar      = "\u2588" * (pct // 10) + "\u2591" * (10 - pct // 10)
                     disks_fmt.append(
-                        f"  {did}  [{bar}] {pct}%  {free} GB free / {total} GB")
+                        f"  {did}   {used_gb} GB used / {total_gb} GB total"
+                        f"   [{bar}] {pct}%   free: {free_gb} GB")
                 except Exception:
-                    disks_fmt.append(f"  {l}")
+                    continue
     except Exception:
+        pass
+
+    if not disks_fmt:
         disks_fmt = ["  N/A"]
 
     boot_str = boot_time
@@ -570,21 +680,29 @@ def fetch_system_info(ip, text_widget, status_lbl, t):
         except Exception:
             boot_str = boot_time
 
-    output = (f"{'─'*44}\n"
-              f"  OS:        {os_info}\n"
-              f"  Last Boot: {boot_str}\n"
-              f"{'─'*44}\n"
-              f"  Model:     {computer}\n"
-              f"  Serial:    {serial}\n"
-              f"{'─'*44}\n"
-              f"  Disks:\n" + "\n".join(disks_fmt) + f"\n{'─'*44}")
+    sep    = "-" * 50
+    output = (
+        f"{sep}\n"
+        f"  OS:        {os_info}\n"
+        f"  Last Boot: {boot_str}\n"
+        f"{sep}\n"
+        f"  CPU:       {cpu_info}\n"
+        f"  RAM:       {ram_info}\n"
+        f"  GPU:       {gpu_info}\n"
+        f"{sep}\n"
+        f"  Model:     {computer}\n"
+        f"  Serial:    {serial}\n"
+        f"  BIOS:      {bios_ver}\n"
+        f"{sep}\n"
+        f"  Disks:\n" + "\n".join(disks_fmt) + f"\n{sep}"
+    )
 
     def update():
         text_widget.configure(state="normal")
         text_widget.delete("1.0", "end")
         text_widget.insert("end", output)
         text_widget.configure(state="disabled")
-        status_lbl.configure(text="✅ Loaded", fg=t["online_fg"])
+        status_lbl.configure(text="Loaded", fg=t["online_fg"])
 
     status_lbl.after(0, update)
 
@@ -609,7 +727,7 @@ def fetch_services(ip, tree_widget, status_lbl, t):
                 break
 
         if not header:
-            err_txt = "❌ No data or access denied"
+            err_txt = "No data or access denied"
             status_lbl.after(0, lambda: status_lbl.configure(
                 text=err_txt, fg=t["offline_fg"]))
             return
@@ -625,7 +743,7 @@ def fetch_services(ip, tree_widget, status_lbl, t):
             for row in tree_widget.get_children():
                 tree_widget.delete(row)
             if not data_lines:
-                status_lbl.configure(text="❌ No services found", fg=t["offline_fg"])
+                status_lbl.configure(text="No services found", fg=t["offline_fg"])
                 return
             running = 0
             for line in data_lines:
@@ -647,14 +765,14 @@ def fetch_services(ip, tree_widget, status_lbl, t):
             tree_widget.tag_configure("svc_run",  foreground=t["online_fg"])
             tree_widget.tag_configure("svc_stop", foreground=t["offline_fg"])
             total = len(tree_widget.get_children())
-            status_lbl.configure(text=f"⚡ {running} running / {total} total",
+            status_lbl.configure(text=f"{running} running / {total} total",
                                   fg=t["online_fg"])
 
         status_lbl.after(0, update)
 
     except subprocess.TimeoutExpired:
         status_lbl.after(0, lambda: status_lbl.configure(
-            text="⏱ Timeout", fg=t["offline_fg"]))
+            text="Timeout", fg=t["offline_fg"]))
     except Exception as e:
         err = str(e)
         status_lbl.after(0, lambda: status_lbl.configure(
@@ -680,7 +798,7 @@ def fetch_software(ip, tree_widget, status_lbl, t):
                 break
 
         if not header:
-            err_txt = "❌ No data or access denied"
+            err_txt = "No data or access denied"
             status_lbl.after(0, lambda: status_lbl.configure(
                 text=err_txt, fg=t["offline_fg"]))
             return
@@ -706,14 +824,14 @@ def fetch_software(ip, tree_widget, status_lbl, t):
                 except Exception:
                     continue
             status_lbl.configure(
-                text=f"📋 Found {len(tree_widget.get_children())} programs",
+                text=f"Found {len(tree_widget.get_children())} programs",
                 fg=t["online_fg"])
 
         status_lbl.after(0, update)
 
     except subprocess.TimeoutExpired:
         status_lbl.after(0, lambda: status_lbl.configure(
-            text="⏱ Timeout (wmic product slow — up to 60s)",
+            text="Timeout (wmic product slow - up to 60s)",
             fg=t["offline_fg"]))
     except Exception as e:
         err = str(e)
@@ -727,7 +845,7 @@ def remote_reboot(hostname):
             ["shutdown", "/r", f"/m:\\\\{hostname}", "/t", "0"],
             capture_output=True, text=True)
         if r.returncode == 0:
-            messagebox.showinfo("Reboot", f"✅ Reboot sent to {hostname}")
+            messagebox.showinfo("Reboot", f"Reboot sent to {hostname}")
         else:
             messagebox.showerror("Error", r.stderr or "Failed")
 
@@ -737,7 +855,7 @@ def remote_shutdown(hostname):
             ["shutdown", "/s", f"/m:\\\\{hostname}", "/t", "0"],
             capture_output=True, text=True)
         if r.returncode == 0:
-            messagebox.showinfo("Shutdown", f"✅ Shutdown sent to {hostname}")
+            messagebox.showinfo("Shutdown", f"Shutdown sent to {hostname}")
         else:
             messagebox.showerror("Error", r.stderr or "Failed")
 
@@ -751,8 +869,8 @@ def show_host_info(event):
     t = THEMES[current_theme]
 
     win = tk.Toplevel(root)
-    win.title(f"Host — {hostname}")
-    win.geometry("620x580")
+    win.title(f"Host - {hostname}")
+    win.geometry("680x620")
     win.resizable(False, False)
     win.configure(bg=t["bg"])
 
@@ -761,7 +879,7 @@ def show_host_info(event):
 
     # ── вкладка 1: Info ───────────────────────────────────────────────────────
     tab_info = tk.Frame(notebook, bg=t["bg"])
-    notebook.add(tab_info, text="ℹ️ Info")
+    notebook.add(tab_info, text="Info")
 
     for label, value in [("IP", ip), ("Hostname", hostname),
                          ("Ping", ping), ("Status", status), ("MAC", mac)]:
@@ -773,7 +891,7 @@ def show_host_info(event):
                  anchor="w", bg=t["bg"], fg=t["fg"]).pack(side="left")
 
     tk.Frame(tab_info, height=1, bg=t["heading_bg"]).pack(fill="x", padx=20, pady=6)
-    tk.Label(tab_info, text="👤 Logged-in User",
+    tk.Label(tab_info, text="Logged-in User",
              font=("Segoe UI", 10, "bold"), bg=t["bg"], fg=t["fg"]).pack(anchor="w", padx=20)
 
     user_label = tk.Label(tab_info, text="Checking...",
@@ -781,7 +899,7 @@ def show_host_info(event):
     user_label.pack(anchor="w", padx=20, pady=3)
 
     tk.Frame(tab_info, height=1, bg=t["heading_bg"]).pack(fill="x", padx=20, pady=6)
-    tk.Label(tab_info, text="🔌 Connect",
+    tk.Label(tab_info, text="Connect",
              font=("Segoe UI", 10, "bold"), bg=t["bg"], fg=t["fg"]).pack(anchor="w", padx=20)
 
     btn_cfg  = {"bg": t["btn_bg"], "fg": t["btn_fg"], "width": 11,
@@ -789,36 +907,42 @@ def show_host_info(event):
     btn_cfg2 = {"bg": t["btn_bg"], "fg": t["btn_fg"], "width": 13,
                 "font": ("Segoe UI", 9), "relief": "flat", "bd": 1}
 
+    # ── строка 1: подключение ─────────────────────────────────────────────────
     btn_frame = tk.Frame(tab_info, bg=t["bg"])
     btn_frame.pack(pady=4, padx=20, fill="x")
 
-    tk.Button(btn_frame, text="🖥️ RDP",     **btn_cfg,
+    tk.Button(btn_frame, text="RDP",       **btn_cfg,
               command=lambda: action_rdp(ip)).pack(side="left", padx=3)
-    tk.Button(btn_frame, text="💻 PsExec",  **btn_cfg,
+    tk.Button(btn_frame, text="PsExec",    **btn_cfg,
               command=lambda: action_psexec(ip)).pack(side="left", padx=3)
-    tk.Button(btn_frame, text="🔗 Net Use", **btn_cfg,
+    tk.Button(btn_frame, text="Net Use",   **btn_cfg,
               command=lambda: action_netuse(ip, hostname)).pack(side="left", padx=3)
-    tk.Button(btn_frame, text="📁 UNC",     **btn_cfg,
+    tk.Button(btn_frame, text="UNC C$",    **btn_cfg,
               command=lambda: action_unc(hostname)).pack(side="left", padx=3)
-    tk.Button(btn_frame, text="🔄 Refresh", **btn_cfg,
-              command=lambda: threading.Thread(
-                  target=fetch_user, args=(ip, user_label, t),
-                  daemon=True).start()).pack(side="left", padx=3)
+    tk.Button(btn_frame, text="DameWare",
+              bg="#005a9e", fg="#ffffff", width=11,
+              font=("Segoe UI", 9), relief="flat", bd=1,
+              command=lambda: action_dameware(ip)).pack(side="left", padx=3)
 
-    tk.Label(tab_info, text="🛠️ Management Tools",
+    # ── строка 2: управление ─────────────────────────────────────────────────
+    tk.Label(tab_info, text="Management Tools",
              font=("Segoe UI", 10, "bold"), bg=t["bg"], fg=t["fg"]).pack(
         anchor="w", padx=20, pady=(6, 0))
 
     btn_frame2 = tk.Frame(tab_info, bg=t["bg"])
     btn_frame2.pack(pady=4, padx=20, fill="x")
 
-    tk.Button(btn_frame2, text="🖥 Comp Mgmt",     **btn_cfg2,
+    tk.Button(btn_frame2, text="Comp Mgmt",    **btn_cfg2,
               command=lambda: action_compmgmt(hostname)).pack(side="left", padx=3)
-    tk.Button(btn_frame2, text="⚙️ Services",      **btn_cfg2,
+    tk.Button(btn_frame2, text="Services",     **btn_cfg2,
               command=lambda: action_services(hostname)).pack(side="left", padx=3)
-    tk.Button(btn_frame2, text="📋 Event Log",     **btn_cfg2,
+    tk.Button(btn_frame2, text="Event Log",    **btn_cfg2,
               command=lambda: action_eventlog(hostname)).pack(side="left", padx=3)
-    tk.Button(btn_frame2, text="🔓 Unjoin Domain",
+    tk.Button(btn_frame2, text="Refresh User", **btn_cfg2,
+              command=lambda: threading.Thread(
+                  target=fetch_user, args=(ip, user_label, t),
+                  daemon=True).start()).pack(side="left", padx=3)
+    tk.Button(btn_frame2, text="Unjoin Domain",
               bg="#8b0000", fg="#ffffff", width=13,
               font=("Segoe UI", 9), relief="flat", bd=1,
               command=lambda: action_unjoin_domain(hostname, win)
@@ -828,7 +952,7 @@ def show_host_info(event):
 
     # ── вкладка 2: Printers ───────────────────────────────────────────────────
     tab_printers = tk.Frame(notebook, bg=t["bg"])
-    notebook.add(tab_printers, text="🖨️ Printers")
+    notebook.add(tab_printers, text="Printers")
 
     pr_status = tk.Label(tab_printers, text="Loading...",
                          font=("Segoe UI", 9), bg=t["bg"], fg=t["status_fg"])
@@ -850,12 +974,12 @@ def show_host_info(event):
 
     pr_btn = tk.Frame(tab_printers, bg=t["bg"])
     pr_btn.pack(pady=6)
-    tk.Button(pr_btn, text="🔄 Refresh", bg=t["btn_bg"], fg=t["btn_fg"],
+    tk.Button(pr_btn, text="Refresh", bg=t["btn_bg"], fg=t["btn_fg"],
               font=("Segoe UI", 9), relief="flat",
               command=lambda: threading.Thread(
                   target=fetch_printers, args=(ip, pr_tree, pr_status, t),
                   daemon=True).start()).pack(side="left", padx=5)
-    tk.Button(pr_btn, text="🖨️ Open in CMD", bg=t["btn_bg"], fg=t["btn_fg"],
+    tk.Button(pr_btn, text="Open in CMD", bg=t["btn_bg"], fg=t["btn_fg"],
               font=("Segoe UI", 9), relief="flat",
               command=lambda: os.system(
                   f'start cmd /k "wmic /node:{ip} printer list brief & pause"')
@@ -866,7 +990,7 @@ def show_host_info(event):
 
     # ── вкладка 3: System ─────────────────────────────────────────────────────
     tab_system = tk.Frame(notebook, bg=t["bg"])
-    notebook.add(tab_system, text="💻 System")
+    notebook.add(tab_system, text="System")
 
     sys_status = tk.Label(tab_system, text="Loading...",
                           font=("Segoe UI", 9), bg=t["bg"], fg=t["status_fg"])
@@ -874,10 +998,10 @@ def show_host_info(event):
 
     sys_text = tk.Text(tab_system, font=("Consolas", 9),
                        bg=t["entry_bg"], fg=t["fg"],
-                       relief="flat", state="disabled", wrap="word", height=15)
+                       relief="flat", state="disabled", wrap="none", height=16)
     sys_text.pack(fill="both", expand=True, padx=10, pady=4)
 
-    tk.Button(tab_system, text="🔄 Refresh", bg=t["btn_bg"], fg=t["btn_fg"],
+    tk.Button(tab_system, text="Refresh", bg=t["btn_bg"], fg=t["btn_fg"],
               font=("Segoe UI", 9), relief="flat",
               command=lambda: threading.Thread(
                   target=fetch_system_info,
@@ -889,7 +1013,7 @@ def show_host_info(event):
 
     # ── вкладка 4: Services ───────────────────────────────────────────────────
     tab_services = tk.Frame(notebook, bg=t["bg"])
-    notebook.add(tab_services, text="⚡ Services")
+    notebook.add(tab_services, text="Services")
 
     svc_status = tk.Label(tab_services, text="Loading services...",
                           font=("Segoe UI", 9), bg=t["bg"], fg=t["status_fg"])
@@ -939,7 +1063,7 @@ def show_host_info(event):
     ttk.Scrollbar(svc_frame, orient="vertical",
                   command=svc_tree.yview).pack(side="right", fill="y")
 
-    tk.Button(tab_services, text="🔄 Refresh", bg=t["btn_bg"], fg=t["btn_fg"],
+    tk.Button(tab_services, text="Refresh", bg=t["btn_bg"], fg=t["btn_fg"],
               font=("Segoe UI", 9), relief="flat",
               command=lambda: threading.Thread(
                   target=fetch_services, args=(ip, svc_tree, svc_status, t),
@@ -950,10 +1074,10 @@ def show_host_info(event):
 
     # ── вкладка 5: Software ───────────────────────────────────────────────────
     tab_software = tk.Frame(notebook, bg=t["bg"])
-    notebook.add(tab_software, text="📋 Software")
+    notebook.add(tab_software, text="Software")
 
     sw_status = tk.Label(tab_software,
-                         text="⚠️ Click Load — may take up to 60 sec",
+                         text="Click Load - may take up to 60 sec",
                          font=("Segoe UI", 9), bg=t["bg"], fg=t["status_fg"])
     sw_status.pack(anchor="w", padx=10, pady=4)
 
@@ -973,7 +1097,7 @@ def show_host_info(event):
 
     sw_btn = tk.Frame(tab_software, bg=t["bg"])
     sw_btn.pack(pady=4)
-    tk.Button(sw_btn, text="📋 Load Software List",
+    tk.Button(sw_btn, text="Load Software List",
               bg=t["btn_bg"], fg=t["btn_fg"],
               font=("Segoe UI", 9), relief="flat",
               command=lambda: threading.Thread(
@@ -982,13 +1106,13 @@ def show_host_info(event):
 
     # ── вкладка 6: Power ──────────────────────────────────────────────────────
     tab_power = tk.Frame(notebook, bg=t["bg"])
-    notebook.add(tab_power, text="🔋 Power")
+    notebook.add(tab_power, text="Power")
 
     hdr_bg = "#3a1a1a"
     header_frame = tk.Frame(tab_power, bg=hdr_bg, pady=12)
     header_frame.pack(fill="x")
 
-    tk.Label(header_frame, text="⚠️  Remote Power Management",
+    tk.Label(header_frame, text="Remote Power Management",
              font=("Segoe UI", 12, "bold"),
              bg=hdr_bg, fg="#ff6b6b").pack()
     tk.Label(header_frame, text=f"Target:  {hostname}",
@@ -1002,7 +1126,7 @@ def show_host_info(event):
 
     reboot_frame = tk.Frame(pw_frame, bg=t["bg"])
     reboot_frame.pack(side="left", padx=20)
-    tk.Button(reboot_frame, text="🔄  Reboot",
+    tk.Button(reboot_frame, text="Reboot",
               bg="#cc4400", fg="#ffffff",
               font=("Segoe UI", 12, "bold"),
               width=14, height=2, relief="flat", cursor="hand2",
@@ -1013,7 +1137,7 @@ def show_host_info(event):
 
     shutdown_frame = tk.Frame(pw_frame, bg=t["bg"])
     shutdown_frame.pack(side="left", padx=20)
-    tk.Button(shutdown_frame, text="⏹  Shutdown",
+    tk.Button(shutdown_frame, text="Shutdown",
               bg="#880000", fg="#ffffff",
               font=("Segoe UI", 12, "bold"),
               width=14, height=2, relief="flat", cursor="hand2",
@@ -1027,15 +1151,15 @@ def show_host_info(event):
     info_pw = tk.Frame(tab_power, bg=t["bg"])
     info_pw.pack(pady=12, padx=20, fill="x")
 
-    for icon, txt in [
-        ("🔑", "Requires local admin rights on the remote host"),
-        ("⚡", "Actions execute immediately with no delay"),
-        ("💾", "Unsaved work on the remote PC will be lost"),
+    for txt in [
+        "Requires local admin rights on the remote host",
+        "Actions execute immediately with no delay",
+        "Unsaved work on the remote PC will be lost",
     ]:
         pw_row = tk.Frame(info_pw, bg=t["bg"])
         pw_row.pack(anchor="w", pady=2)
-        tk.Label(pw_row, text=icon, font=("Segoe UI", 10),
-                 bg=t["bg"]).pack(side="left", padx=(0, 6))
+        tk.Label(pw_row, text="  *", font=("Segoe UI", 9),
+                 bg=t["bg"], fg=t["offline_fg"]).pack(side="left")
         tk.Label(pw_row, text=txt, font=("Segoe UI", 9),
                  bg=t["bg"], fg=t["fg"]).pack(side="left")
 
@@ -1125,7 +1249,7 @@ def run_scan():
     _scan_done = 0
     root.after(0, reset_progress)
     root.after(0, lambda: status_label.configure(text="Scanning..."))
-    update_sb_left(f"🔄 Scanning VLAN {selected_vlan}...")
+    update_sb_left(f"Scanning VLAN {selected_vlan}...")
     update_sb_center("")
     update_sb_right(f"My IP: {MY_IP}")
 
@@ -1136,7 +1260,7 @@ def run_scan():
     for network in networks:
         if _stop_flag.is_set():
             break
-        all_results.extend(scan_network(network, progress_callback=on_host_done))
+        all_results.extend(scan_network(network, progress_callback=on_host_done, stop_flag=_stop_flag, fetch_mac=fetch_mac_var.get()))
     results = all_results
 
     duration     = time.time() - scan_start
@@ -1145,8 +1269,8 @@ def run_scan():
     online_count  = sum(1 for r in results if r[3] == "ONLINE")
     offline_count = sum(1 for r in results if r[3] == "OFFLINE")
 
-    root.after(0, lambda: online_label.configure(text=f"🟢 ONLINE: {online_count}"))
-    root.after(0, lambda: offline_label.configure(text=f"🔴 OFFLINE: {offline_count}"))
+    root.after(0, lambda: online_label.configure(text=f"ONLINE: {online_count}"))
+    root.after(0, lambda: offline_label.configure(text=f"OFFLINE: {offline_count}"))
     root.after(0, lambda: [tree.delete(i) for i in tree.get_children()])
 
     for ip, host, ping, status, mac in results:
@@ -1155,7 +1279,7 @@ def run_scan():
                    tree.insert("", "end", values=r, tags=(tg,)))
 
     root.after(0, lambda: set_progress(_scan_total, _scan_total))
-    msg = (f"⏹ Stopped. Found {len(results)} hosts so far"
+    msg = (f"Stopped. Found {len(results)} hosts so far"
            if _stop_flag.is_set()
            else f"Scan completed. Found {len(results)} hosts")
     root.after(0, lambda: status_label.configure(text=msg))
@@ -1165,7 +1289,7 @@ def run_scan():
     root.after(0, lambda: tb_export_btn.configure(state="normal"))
     root.after(0, lambda: tb_copy_btn.configure(state="normal"))
 
-    update_sb_left(f"✅ Last scan: {scan_time_str}   ⏱ Duration: {duration_str}")
+    update_sb_left(f"Last scan: {scan_time_str}   Duration: {duration_str}")
     update_sb_center(f"Showing {len(results)} of {len(results)} hosts")
     update_sb_right(f"My IP: {MY_IP}")
 
@@ -1190,8 +1314,8 @@ title_label = tk.Label(top_frame, text="TASMC Network Scanner",
                        font=("Segoe UI", 20, "bold"))
 title_label.pack(side="left")
 
-theme_btn = tk.Button(top_frame, text="🌙 Dark Mode",
-                      width=14, command=toggle_theme)
+theme_btn = tk.Button(top_frame, text="Dark Mode",
+                      width=12, command=toggle_theme)
 theme_btn.pack(side="right")
 
 toolbar = tk.Frame(root, bd=1, relief="raised", height=36)
@@ -1203,20 +1327,20 @@ def tb_sep():
 
 TB = {"relief": "flat", "font": ("Segoe UI", 9), "bd": 0, "padx": 6, "pady": 3}
 
-tb_scan_btn = tk.Button(toolbar, text="▶ Scan",      width=7,  **TB, command=start_scan)
+tb_scan_btn = tk.Button(toolbar, text="Scan",       width=7,  **TB, command=start_scan)
 tb_scan_btn.pack(side="left", padx=2, pady=2)
-tb_stop_btn = tk.Button(toolbar, text="⏹ Stop",      width=7,  **TB,
+tb_stop_btn = tk.Button(toolbar, text="Stop",       width=7,  **TB,
                         state="disabled", command=stop_scan)
 tb_stop_btn.pack(side="left", padx=2, pady=2)
 tb_sep()
-tb_export_btn = tk.Button(toolbar, text="📊 Export",  width=8,  **TB,
+tb_export_btn = tk.Button(toolbar, text="Export",   width=8,  **TB,
                           state="disabled", command=export_results)
 tb_export_btn.pack(side="left", padx=2, pady=2)
-tb_copy_btn = tk.Button(toolbar, text="📋 Copy IPs",  width=10, **TB,
+tb_copy_btn = tk.Button(toolbar, text="Copy IPs",   width=10, **TB,
                         state="disabled", command=copy_online_ips)
 tb_copy_btn.pack(side="left", padx=2, pady=2)
 tb_sep()
-tk.Label(toolbar, text="🔍 Ping:", font=("Segoe UI", 9)).pack(
+tk.Label(toolbar, text="Ping:", font=("Segoe UI", 9)).pack(
     side="left", padx=(4, 2), pady=2)
 ping_entry = tk.Entry(toolbar, width=16, font=("Segoe UI", 9))
 ping_entry.pack(side="left", pady=2)
@@ -1227,7 +1351,7 @@ ping_result_label = tk.Label(toolbar, text="", font=("Segoe UI", 9),
                               width=28, anchor="w")
 ping_result_label.pack(side="left", padx=6)
 tb_sep()
-tb_theme_btn = tk.Button(toolbar, text="🌙", width=3, **TB, command=toggle_theme)
+tb_theme_btn = tk.Button(toolbar, text="Dark", width=5, **TB, command=toggle_theme)
 tb_theme_btn.pack(side="right", padx=4, pady=2)
 
 ctrl_frame = tk.Frame(root)
@@ -1237,16 +1361,21 @@ vlan_combo = ttk.Combobox(ctrl_frame, values=list(vlans.keys()) + ["ALL"],
                           state="readonly", width=10)
 vlan_combo.set("150")
 vlan_combo.pack(side="left", padx=10)
-scan_button = tk.Button(ctrl_frame, text="▶ Start Scan", width=16, command=start_scan)
+scan_button = tk.Button(ctrl_frame, text="Start Scan", width=16, command=start_scan)
 scan_button.pack(side="left", padx=5)
-export_button = tk.Button(ctrl_frame, text="📊 Export Excel", width=16,
+export_button = tk.Button(ctrl_frame, text="Export Excel", width=16,
                           command=export_results, state="disabled")
 export_button.pack(side="left", padx=5)
 
+fetch_mac_var = tk.BooleanVar(value=False)
+tk.Checkbutton(ctrl_frame, text="Fetch MAC (slow)",
+               variable=fetch_mac_var,
+               font=("Segoe UI", 9)).pack(side="left", padx=10)
+
 info_frame = tk.Frame(root)
 info_frame.pack(pady=3)
-online_label  = tk.Label(info_frame, text="🟢 ONLINE: 0",  font=("Segoe UI", 10))
-offline_label = tk.Label(info_frame, text="🔴 OFFLINE: 0", font=("Segoe UI", 10))
+online_label  = tk.Label(info_frame, text="ONLINE: 0",  font=("Segoe UI", 10))
+offline_label = tk.Label(info_frame, text="OFFLINE: 0", font=("Segoe UI", 10))
 online_label.pack(side="left", padx=15)
 offline_label.pack(side="left", padx=15)
 tk.Label(info_frame, text="|", font=("Segoe UI", 10)).pack(side="left", padx=10)
@@ -1294,23 +1423,23 @@ scrollbar.pack(side="right", fill="y")
 tree.configure(yscrollcommand=scrollbar.set)
 
 context_menu = tk.Menu(root, tearoff=0)
-context_menu.add_command(label="📋 Copy IP",       command=copy_ip)
-context_menu.add_command(label="📋 Copy MAC",      command=copy_mac)
-context_menu.add_command(label="📋 Copy Hostname", command=copy_hostname)
+context_menu.add_command(label="Copy IP",       command=copy_ip)
+context_menu.add_command(label="Copy MAC",      command=copy_mac)
+context_menu.add_command(label="Copy Hostname", command=copy_hostname)
 context_menu.add_separator()
-context_menu.add_command(label="🖥️ RDP Connect",   command=rdp_connect)
+context_menu.add_command(label="RDP Connect",   command=rdp_connect)
 
 statusbar_frame = tk.Frame(root, height=24)
 statusbar_frame.pack(side="bottom", fill="x")
 sb_left = tk.Label(statusbar_frame, text="Ready",
                    font=("Segoe UI", 9), anchor="w", padx=10)
 sb_left.pack(side="left")
-sb_sep1 = tk.Label(statusbar_frame, text="│", font=("Segoe UI", 9))
+sb_sep1 = tk.Label(statusbar_frame, text="|", font=("Segoe UI", 9))
 sb_sep1.pack(side="left")
 sb_center = tk.Label(statusbar_frame, text="",
                      font=("Segoe UI", 9), anchor="center")
 sb_center.pack(side="left", padx=20)
-sb_sep2 = tk.Label(statusbar_frame, text="│", font=("Segoe UI", 9))
+sb_sep2 = tk.Label(statusbar_frame, text="|", font=("Segoe UI", 9))
 sb_sep2.pack(side="left")
 sb_right = tk.Label(statusbar_frame, text=f"My IP: {MY_IP}",
                     font=("Segoe UI", 9), anchor="e", padx=10)
