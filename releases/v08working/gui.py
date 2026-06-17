@@ -244,7 +244,22 @@ def action_netuse(ip, hostname):
     os.system(f'start cmd /k "net use \\\\{hostname} && echo. && echo Connected to {hostname} && cmd"')
 
 def action_unc(hostname):
-    os.startfile(f"\\\\{hostname}\\c$")
+    # пробуем os.startfile, при ошибке — explorer как fallback
+    try:
+        os.startfile(f"\\\\{hostname}\\c$")
+    except Exception:
+        try:
+            subprocess.Popen(["explorer", f"\\\\{hostname}\\c$"])
+        except Exception as e:
+            messagebox.showerror(
+                "UNC Error",
+                f"Cannot open  \\\\{hostname}\\c$\n\n"
+                f"Possible reasons:\n"
+                f"  • Host is offline or unreachable\n"
+                f"  • File sharing is disabled\n"
+                f"  • Firewall blocking SMB (port 445)\n\n"
+                f"Try Net Use first to authenticate.\n\n"
+                f"Details: {e}")
 
 def action_compmgmt(hostname):
     os.system(f'mmc compmgmt.msc /computer:{hostname}')
@@ -254,6 +269,151 @@ def action_services(hostname):
 
 def action_eventlog(hostname):
     os.system(f'eventvwr.exe \\\\{hostname}')
+
+# ── unjoin domain ─────────────────────────────────────────────────────────────
+def action_unjoin_domain(hostname, win_parent):
+    t = THEMES[current_theme]
+
+    cred_win = tk.Toplevel(win_parent)
+    cred_win.title(f"Unjoin Domain — {hostname}")
+    cred_win.geometry("420x320")
+    cred_win.resizable(False, False)
+    cred_win.configure(bg=t["bg"])
+    cred_win.grab_set()
+
+    hdr = tk.Frame(cred_win, bg="#3a1a1a", pady=10)
+    hdr.pack(fill="x")
+    tk.Label(hdr, text="🔓  Remove PC from Domain",
+             font=("Segoe UI", 11, "bold"),
+             bg="#3a1a1a", fg="#ff6b6b").pack()
+    tk.Label(hdr, text=f"Target: {hostname}",
+             font=("Segoe UI", 9),
+             bg="#3a1a1a", fg="#dcdcdc").pack()
+
+    form = tk.Frame(cred_win, bg=t["bg"])
+    form.pack(pady=15, padx=20, fill="x")
+
+    def field(label_text, default="", show=None):
+        row = tk.Frame(form, bg=t["bg"])
+        row.pack(fill="x", pady=4)
+        tk.Label(row, text=label_text, width=12, anchor="w",
+                 font=("Segoe UI", 9), bg=t["bg"], fg=t["fg"]).pack(side="left")
+        kw = {"width": 28, "font": ("Segoe UI", 9),
+              "bg": t["entry_bg"], "fg": t["entry_fg"],
+              "insertbackground": t["fg"]}
+        if show:
+            kw["show"] = show
+        e = tk.Entry(row, **kw)
+        e.pack(side="left")
+        e.insert(0, default)
+        return e
+
+    user_entry = field("Username:",  "TASMC\\")
+    pass_entry = field("Password:",  show="*")
+    wg_entry   = field("Workgroup:", "WORKGROUP")
+
+    result_label = tk.Label(cred_win, text="",
+                            font=("Segoe UI", 9),
+                            bg=t["bg"], fg=t["offline_fg"],
+                            wraplength=380, justify="center")
+    result_label.pack(pady=4)
+
+    def do_unjoin():
+        username  = user_entry.get().strip()
+        password  = pass_entry.get().strip()
+        workgroup = wg_entry.get().strip() or "WORKGROUP"
+
+        if not username or not password:
+            result_label.configure(text="❌ Username and password required",
+                                   fg=t["offline_fg"])
+            return
+
+        if not messagebox.askyesno(
+                "Confirm Unjoin",
+                f"Remove  {hostname}  from domain\n"
+                f"and join workgroup  '{workgroup}'?\n\n"
+                f"⚠️  The PC will reboot automatically!",
+                parent=cred_win):
+            return
+
+        btn_ok.configure(state="disabled", text="⏳ Working...")
+        result_label.configure(text="Executing PowerShell...",
+                                fg=t["status_fg"])
+        cred_win.update()
+
+        threading.Thread(
+            target=_do_unjoin_thread,
+            args=(hostname, username, password, workgroup,
+                  result_label, btn_ok, cred_win),
+            daemon=True
+        ).start()
+
+    btn_row = tk.Frame(cred_win, bg=t["bg"])
+    btn_row.pack(pady=6)
+
+    btn_ok = tk.Button(btn_row, text="🔓 Remove from Domain",
+                       bg="#cc4400", fg="#ffffff",
+                       font=("Segoe UI", 10, "bold"),
+                       relief="flat", cursor="hand2",
+                       activebackground="#ff5500",
+                       activeforeground="#ffffff",
+                       command=do_unjoin)
+    btn_ok.pack(side="left", padx=8)
+
+    tk.Button(btn_row, text="Cancel",
+              bg=t["btn_bg"], fg=t["btn_fg"],
+              font=("Segoe UI", 9), relief="flat",
+              command=cred_win.destroy).pack(side="left", padx=8)
+
+    pass_entry.bind("<Return>", lambda e: do_unjoin())
+
+
+def _do_unjoin_thread(hostname, username, password,
+                      workgroup, result_label, btn_ok, cred_win):
+    try:
+        ps_script = (
+            f"$pw = ConvertTo-SecureString '{password}' -AsPlainText -Force; "
+            f"$cred = New-Object System.Management.Automation.PSCredential('{username}', $pw); "
+            f"Remove-Computer -ComputerName '{hostname}' "
+            f"-WorkgroupName '{workgroup}' -Credential $cred -Force -PassThru; "
+            f"Start-Sleep -Seconds 2; "
+            f"Restart-Computer -ComputerName '{hostname}' -Force"
+        )
+
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive",
+             "-Command", ps_script],
+            capture_output=True, text=True, timeout=45
+        )
+
+        stdout = result.stdout.strip()
+        stderr = result.stderr.strip()
+
+        if result.returncode == 0 or "HasSucceeded" in stdout:
+            text  = f"✅ Success!\n{hostname} removed from domain.\nRebooting in 2 seconds..."
+            color = "darkgreen"
+            result_label.after(4000, cred_win.destroy)
+        else:
+            err   = stderr or stdout or "Unknown error"
+            err   = err.split("\n")[0][:150]
+            text  = f"❌ Failed:\n{err}"
+            color = "#ff6b6b"
+            btn_ok.after(0, lambda: btn_ok.configure(
+                state="normal", text="🔓 Remove from Domain"))
+
+    except subprocess.TimeoutExpired:
+        text  = "⏱ Timeout — PowerShell took too long"
+        color = "#ff6b6b"
+        btn_ok.after(0, lambda: btn_ok.configure(
+            state="normal", text="🔓 Remove from Domain"))
+    except Exception as e:
+        err   = str(e)
+        text  = f"❌ Error: {err}"
+        color = "#ff6b6b"
+        btn_ok.after(0, lambda: btn_ok.configure(
+            state="normal", text="🔓 Remove from Domain"))
+
+    result_label.after(0, lambda: result_label.configure(text=text, fg=color))
 
 # ── fetch: logged-in user ─────────────────────────────────────────────────────
 def fetch_user(ip, label, t):
@@ -624,10 +784,11 @@ def show_host_info(event):
     tk.Label(tab_info, text="🔌 Connect",
              font=("Segoe UI", 10, "bold"), bg=t["bg"], fg=t["fg"]).pack(anchor="w", padx=20)
 
-    btn_cfg = {"bg": t["btn_bg"], "fg": t["btn_fg"], "width": 11,
-               "font": ("Segoe UI", 9), "relief": "flat", "bd": 1}
+    btn_cfg  = {"bg": t["btn_bg"], "fg": t["btn_fg"], "width": 11,
+                "font": ("Segoe UI", 9), "relief": "flat", "bd": 1}
+    btn_cfg2 = {"bg": t["btn_bg"], "fg": t["btn_fg"], "width": 13,
+                "font": ("Segoe UI", 9), "relief": "flat", "bd": 1}
 
-    # ── строка 1: основные подключения ───────────────────────────────────────
     btn_frame = tk.Frame(tab_info, bg=t["bg"])
     btn_frame.pack(pady=4, padx=20, fill="x")
 
@@ -644,19 +805,24 @@ def show_host_info(event):
                   target=fetch_user, args=(ip, user_label, t),
                   daemon=True).start()).pack(side="left", padx=3)
 
-    # ── строка 2: инструменты управления ─────────────────────────────────────
     tk.Label(tab_info, text="🛠️ Management Tools",
-             font=("Segoe UI", 10, "bold"), bg=t["bg"], fg=t["fg"]).pack(anchor="w", padx=20, pady=(6,0))
+             font=("Segoe UI", 10, "bold"), bg=t["bg"], fg=t["fg"]).pack(
+        anchor="w", padx=20, pady=(6, 0))
 
     btn_frame2 = tk.Frame(tab_info, bg=t["bg"])
     btn_frame2.pack(pady=4, padx=20, fill="x")
 
-    tk.Button(btn_frame2, text="🖥️ Comp Mgmt", **btn_cfg,
+    tk.Button(btn_frame2, text="🖥 Comp Mgmt",     **btn_cfg2,
               command=lambda: action_compmgmt(hostname)).pack(side="left", padx=3)
-    tk.Button(btn_frame2, text="⚙️ Services",  **btn_cfg,
+    tk.Button(btn_frame2, text="⚙️ Services",      **btn_cfg2,
               command=lambda: action_services(hostname)).pack(side="left", padx=3)
-    tk.Button(btn_frame2, text="📋 Event Log", **btn_cfg,
+    tk.Button(btn_frame2, text="📋 Event Log",     **btn_cfg2,
               command=lambda: action_eventlog(hostname)).pack(side="left", padx=3)
+    tk.Button(btn_frame2, text="🔓 Unjoin Domain",
+              bg="#8b0000", fg="#ffffff", width=13,
+              font=("Segoe UI", 9), relief="flat", bd=1,
+              command=lambda: action_unjoin_domain(hostname, win)
+              ).pack(side="left", padx=3)
 
     threading.Thread(target=fetch_user, args=(ip, user_label, t), daemon=True).start()
 
@@ -818,32 +984,60 @@ def show_host_info(event):
     tab_power = tk.Frame(notebook, bg=t["bg"])
     notebook.add(tab_power, text="🔋 Power")
 
-    tk.Label(tab_power,
-             text=f"⚠️  Power actions on:  {hostname}",
+    hdr_bg = "#3a1a1a"
+    header_frame = tk.Frame(tab_power, bg=hdr_bg, pady=12)
+    header_frame.pack(fill="x")
+
+    tk.Label(header_frame, text="⚠️  Remote Power Management",
              font=("Segoe UI", 12, "bold"),
-             bg=t["bg"], fg=t["offline_fg"]).pack(pady=30)
+             bg=hdr_bg, fg="#ff6b6b").pack()
+    tk.Label(header_frame, text=f"Target:  {hostname}",
+             font=("Segoe UI", 10),
+             bg=hdr_bg, fg="#dcdcdc").pack()
+
+    tk.Frame(tab_power, height=1, bg=t["heading_bg"]).pack(fill="x")
 
     pw_frame = tk.Frame(tab_power, bg=t["bg"])
-    pw_frame.pack(pady=10)
+    pw_frame.pack(pady=25)
 
-    tk.Button(pw_frame, text="🔄  Reboot",
+    reboot_frame = tk.Frame(pw_frame, bg=t["bg"])
+    reboot_frame.pack(side="left", padx=20)
+    tk.Button(reboot_frame, text="🔄  Reboot",
               bg="#cc4400", fg="#ffffff",
               font=("Segoe UI", 12, "bold"),
-              width=14, relief="flat",
-              command=lambda: remote_reboot(hostname)
-              ).pack(side="left", padx=15)
+              width=14, height=2, relief="flat", cursor="hand2",
+              activebackground="#ff5500", activeforeground="#ffffff",
+              command=lambda: remote_reboot(hostname)).pack()
+    tk.Label(reboot_frame, text="Restarts the computer",
+             font=("Segoe UI", 8), bg=t["bg"], fg=t["fg"]).pack(pady=4)
 
-    tk.Button(pw_frame, text="⏹  Shutdown",
+    shutdown_frame = tk.Frame(pw_frame, bg=t["bg"])
+    shutdown_frame.pack(side="left", padx=20)
+    tk.Button(shutdown_frame, text="⏹  Shutdown",
               bg="#880000", fg="#ffffff",
               font=("Segoe UI", 12, "bold"),
-              width=14, relief="flat",
-              command=lambda: remote_shutdown(hostname)
-              ).pack(side="left", padx=15)
+              width=14, height=2, relief="flat", cursor="hand2",
+              activebackground="#aa0000", activeforeground="#ffffff",
+              command=lambda: remote_shutdown(hostname)).pack()
+    tk.Label(shutdown_frame, text="Powers off the computer",
+             font=("Segoe UI", 8), bg=t["bg"], fg=t["fg"]).pack(pady=4)
 
-    tk.Label(tab_power,
-             text="Both actions execute immediately with no delay.\nRequires admin rights on the remote host.",
-             font=("Segoe UI", 9), bg=t["bg"], fg=t["fg"],
-             justify="center").pack(pady=12)
+    tk.Frame(tab_power, height=1, bg=t["heading_bg"]).pack(fill="x", padx=20)
+
+    info_pw = tk.Frame(tab_power, bg=t["bg"])
+    info_pw.pack(pady=12, padx=20, fill="x")
+
+    for icon, txt in [
+        ("🔑", "Requires local admin rights on the remote host"),
+        ("⚡", "Actions execute immediately with no delay"),
+        ("💾", "Unsaved work on the remote PC will be lost"),
+    ]:
+        pw_row = tk.Frame(info_pw, bg=t["bg"])
+        pw_row.pack(anchor="w", pady=2)
+        tk.Label(pw_row, text=icon, font=("Segoe UI", 10),
+                 bg=t["bg"]).pack(side="left", padx=(0, 6))
+        tk.Label(pw_row, text=txt, font=("Segoe UI", 9),
+                 bg=t["bg"], fg=t["fg"]).pack(side="left")
 
 # ── контекстное меню ──────────────────────────────────────────────────────────
 def show_context_menu(event):
