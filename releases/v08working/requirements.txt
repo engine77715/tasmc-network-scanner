@@ -1,3 +1,2 @@
 rich
-wmi
-pywin32
+openpyxl

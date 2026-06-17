@@ -32,7 +32,12 @@ def _get_mac(ip: str) -> str:
         return "N/A"
 
 
-def check_host(ip: str, results: list, callback=None) -> None:
+def check_host(ip: str, results: list, callback=None, stop_flag=None) -> None:
+    if stop_flag and stop_flag.is_set():
+        if callback:
+            callback()
+        return
+
     try:
         ping = subprocess.run(
             ["ping", "-n", "1", "-w", "500", ip],
@@ -65,16 +70,19 @@ def check_host(ip: str, results: list, callback=None) -> None:
             callback()
 
 
-def scan_network(network: str, progress_callback=None) -> list:
+def scan_network(network: str, progress_callback=None, stop_flag=None) -> list:
     results = []
 
     with ThreadPoolExecutor(max_workers=100) as executor:
         for i in range(1, 255):
+            if stop_flag and stop_flag.is_set():
+                break
             executor.submit(
                 check_host,
                 f"{network}{i}",
                 results,
-                progress_callback
+                progress_callback,
+                stop_flag
             )
 
     results.sort(key=lambda x: list(map(int, x[0].split("."))))
