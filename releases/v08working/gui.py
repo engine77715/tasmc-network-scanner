@@ -68,10 +68,32 @@ _scan_lock    = threading.Lock()
 _stop_flag    = threading.Event()
 
 vlans = {
-    "150": "10.101.150.",
+    "2":   "10.101.2.",
+    "3":   "10.101.3.",
+    "12":  "10.101.12.",
+    "13":  "10.101.13.",
+    "14":  "10.101.14.",
+    "20":  "10.101.20.",
+    "21":  "10.101.21.",
+    "22":  "10.101.22.",
+    "23":  "10.101.23.",
+    "24":  "10.101.24.",
+    "25":  "10.101.25.",
+    "26":  "10.101.26.",
+    "27":  "10.101.27.",
+    "30":  "10.101.30.",
+    "31":  "10.101.31.",
+    "32":  "10.101.32.",
+    "33":  "10.101.33.",
+    "34":  "10.101.34.",
+    "35":  "10.101.35.",
+    "36":  "10.101.36.",
+    "41":  "10.101.41.",
+    "42":  "10.101.42.",
     "110": "10.101.110.",
+    "113": "10.101.113.",
     "118": "10.101.118.",
-    "113": "10.101.113."
+    "150": "10.101.150.",
 }
 
 def get_my_ip():
@@ -1226,6 +1248,14 @@ def on_host_done():
         text=f"Scanning...  {done} / {total}"))
 
 def start_scan():
+    if vlan_combo.get() == "ALL":
+        total_hosts = 254 * len(vlans)
+        if not messagebox.askyesno(
+                "Scan ALL VLANs",
+                f"This will scan all {len(vlans)} VLANs "
+                f"({total_hosts} addresses total).\n\n"
+                f"This may take a while. Continue?"):
+            return
     threading.Thread(target=run_scan, daemon=True).start()
 
 def run_scan():
@@ -1357,10 +1387,13 @@ tb_theme_btn.pack(side="right", padx=4, pady=2)
 ctrl_frame = tk.Frame(root)
 ctrl_frame.pack(pady=5)
 tk.Label(ctrl_frame, text="VLAN:").pack(side="left")
-vlan_combo = ttk.Combobox(ctrl_frame, values=list(vlans.keys()) + ["ALL"],
-                          state="readonly", width=10)
+_vlan_sorted = sorted(vlans.keys(), key=lambda x: int(x))
+vlan_combo = ttk.Combobox(ctrl_frame, values=_vlan_sorted + ["ALL"],
+                          state="readonly", width=8)
 vlan_combo.set("150")
 vlan_combo.pack(side="left", padx=10)
+tk.Label(ctrl_frame, text=f"({len(vlans)} VLANs)",
+         font=("Segoe UI", 8)).pack(side="left", padx=(0, 10))
 scan_button = tk.Button(ctrl_frame, text="Start Scan", width=16, command=start_scan)
 scan_button.pack(side="left", padx=5)
 export_button = tk.Button(ctrl_frame, text="Export Excel", width=16,
