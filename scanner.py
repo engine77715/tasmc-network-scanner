@@ -1,10 +1,41 @@
 import subprocess
 import socket
 import re
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
 _lock = threading.Lock()
+
+# ── скрытие консольных окон дочерних процессов ────────────────────────────────
+# Критично для PyInstaller --windowed exe: без этого флага каждый
+# subprocess.run() на короткое время мелькает черным окном cmd,
+# а при 100+ параллельных потоках это выглядит как "луп" открывающихся окон.
+if sys.platform == "win32":
+    _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW
+    _STARTUPINFO = subprocess.STARTUPINFO()
+    _STARTUPINFO.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    _STARTUPINFO.wShowWindow = subprocess.SW_HIDE
+else:
+    _CREATE_NO_WINDOW = 0
+    _STARTUPINFO = None
+
+
+def _run_hidden(cmd, timeout=None, encoding=None, errors=None):
+    """subprocess.run с полностью скрытым окном консоли."""
+    kwargs = dict(
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        creationflags=_CREATE_NO_WINDOW,
+    )
+    if _STARTUPINFO is not None:
+        kwargs["startupinfo"] = _STARTUPINFO
+    if encoding:
+        kwargs["encoding"] = encoding
+    if errors:
+        kwargs["errors"] = errors
+    return subprocess.run(cmd, **kwargs)
 
 
 def _parse_ping_ms(output: str) -> str:
@@ -17,9 +48,7 @@ def _parse_ping_ms(output: str) -> str:
 def _get_mac_arp(ip: str) -> str:
     """Быстрый — ARP (только тот же VLAN)."""
     try:
-        arp = subprocess.run(
-            ["arp", "-a", ip],
-            capture_output=True, text=True, timeout=2)
+        arp = _run_hidden(["arp", "-a", ip], timeout=2)
         match = re.search(
             r"([0-9a-fA-F]{2}[:\-]){5}[0-9a-fA-F]{2}",
             arp.stdout)
@@ -33,15 +62,13 @@ def _get_mac_arp(ip: str) -> str:
 def _get_mac_psexec(ip: str) -> str:
     """Fallback — psexec ipconfig /all (работает между VLANами, медленно)."""
     try:
-        result = subprocess.run(
+        result = _run_hidden(
             ["psexec", f"\\\\{ip}", "-s", "-n", "3",
              "ipconfig", "/all"],
-            capture_output=True, text=True, timeout=15,
-            encoding="utf-8", errors="replace"
+            timeout=15, encoding="utf-8", errors="replace"
         )
         output = result.stdout + result.stderr
 
-        # Physical Address. . . . . . . . . : 4C-CC-6A-50-81-60
         matches = re.findall(
             r"Physical Address[\s\.]+:\s*([0-9A-Fa-f]{2}-[0-9A-Fa-f]{2}-[0-9A-Fa-f]{2}-[0-9A-Fa-f]{2}-[0-9A-Fa-f]{2}-[0-9A-Fa-f]{2})",
             output
@@ -58,11 +85,9 @@ def _get_mac_psexec(ip: str) -> str:
 def _get_mac(ip: str, fetch_mac: bool) -> str:
     if not fetch_mac:
         return "N/A"
-    # сначала быстрый ARP
     mac = _get_mac_arp(ip)
     if mac:
         return mac
-    # fallback через psexec
     return _get_mac_psexec(ip)
 
 
@@ -74,9 +99,7 @@ def check_host(ip: str, results: list, callback=None,
         return
 
     try:
-        ping = subprocess.run(
-            ["ping", "-n", "1", "-w", "500", ip],
-            capture_output=True, text=True)
+        ping = _run_hidden(["ping", "-n", "1", "-w", "500", ip])
 
         if ping.returncode == 0:
             ping_ms = _parse_ping_ms(ping.stdout)

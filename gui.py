@@ -4,10 +4,47 @@ import threading
 import time
 import socket
 import subprocess
+import sys
 import os
 import re
 from scanner import scan_network
 from exporter import export_to_excel
+
+# ── скрытие консольных окон дочерних процессов (PyInstaller --windowed) ──────
+if sys.platform == "win32":
+    _CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW
+    _STARTUPINFO = subprocess.STARTUPINFO()
+    _STARTUPINFO.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    _STARTUPINFO.wShowWindow = subprocess.SW_HIDE
+else:
+    _CREATE_NO_WINDOW = 0
+    _STARTUPINFO = None
+
+
+def _run_hidden(cmd, timeout=None, encoding=None, errors=None):
+    """subprocess.run с полностью скрытым окном консоли."""
+    kwargs = dict(
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        creationflags=_CREATE_NO_WINDOW,
+    )
+    if _STARTUPINFO is not None:
+        kwargs["startupinfo"] = _STARTUPINFO
+    if encoding:
+        kwargs["encoding"] = encoding
+    if errors:
+        kwargs["errors"] = errors
+    return subprocess.run(cmd, **kwargs)
+
+
+def _popen_hidden(cmd):
+    """subprocess.Popen с полностью скрытым окном консоли."""
+    kwargs = dict(creationflags=_CREATE_NO_WINDOW)
+    if _STARTUPINFO is not None:
+        kwargs["startupinfo"] = _STARTUPINFO
+    return subprocess.Popen(cmd, **kwargs)
+
 
 THEMES = {
     "Light": {
@@ -254,23 +291,25 @@ def ping_single(event=None):
     ip = ping_entry.get().strip()
     if not ip:
         return
-    os.system(f'start cmd /k "ping -t {ip}"')
+    _popen_hidden(["cmd", "/c", "start", "cmd", "/k", f"ping -t {ip}"])
 
 def action_rdp(ip):
-    os.system(f"mstsc /v:{ip}")
+    _popen_hidden(["mstsc", f"/v:{ip}"])
 
 def action_psexec(ip):
-    os.system(f'start cmd /k "psexec \\\\{ip} -s cmd.exe"')
+    _popen_hidden(["cmd", "/c", "start", "cmd", "/k",
+                   f'psexec \\\\{ip} -s cmd.exe'])
 
 def action_netuse(ip, hostname):
-    os.system(f'start cmd /k "net use \\\\{hostname} && echo. && echo Connected to {hostname} && cmd"')
+    _popen_hidden(["cmd", "/c", "start", "cmd", "/k",
+                   f'net use \\\\{hostname} && echo. && echo Connected to {hostname} && cmd'])
 
 def action_unc(hostname):
     try:
         os.startfile(f"\\\\{hostname}\\c$")
     except Exception:
         try:
-            subprocess.Popen(["explorer", f"\\\\{hostname}\\c$"])
+            _popen_hidden(["explorer", f"\\\\{hostname}\\c$"])
         except Exception as e:
             messagebox.showerror(
                 "UNC Error",
@@ -285,7 +324,7 @@ def action_unc(hostname):
 def action_dameware(ip):
     dw_path = r"C:\Program Files (x86)\SolarWinds\DameWare Remote Support\DWRCC.exe"
     try:
-        subprocess.Popen([dw_path, "-c", "-m:" + ip])
+        _popen_hidden([dw_path, "-c", "-m:" + ip])
     except FileNotFoundError:
         messagebox.showerror(
             "DameWare Error",
@@ -295,13 +334,13 @@ def action_dameware(ip):
         messagebox.showerror("DameWare Error", str(e))
 
 def action_compmgmt(hostname):
-    os.system(f'mmc compmgmt.msc /computer:{hostname}')
+    _popen_hidden(["mmc", "compmgmt.msc", f"/computer:{hostname}"])
 
 def action_services(hostname):
-    os.system(f'mmc services.msc /computer:{hostname}')
+    _popen_hidden(["mmc", "services.msc", f"/computer:{hostname}"])
 
 def action_eventlog(hostname):
-    os.system(f'eventvwr.exe \\\\{hostname}')
+    _popen_hidden(["eventvwr.exe", f"\\\\{hostname}"])
 
 # ── unjoin domain ─────────────────────────────────────────────────────────────
 def action_unjoin_domain(hostname, win_parent):
@@ -412,10 +451,10 @@ def _do_unjoin_thread(hostname, username, password,
             f"Start-Sleep -Seconds 2; "
             f"Restart-Computer -ComputerName '{hostname}' -Force"
         )
-        result = subprocess.run(
+        result = _run_hidden(
             ["powershell", "-NoProfile", "-NonInteractive",
              "-Command", ps_script],
-            capture_output=True, text=True, timeout=45)
+            timeout=45)
 
         stdout = result.stdout.strip()
         stderr = result.stderr.strip()
@@ -448,9 +487,8 @@ def _do_unjoin_thread(hostname, username, password,
 # ── fetch: logged-in user ─────────────────────────────────────────────────────
 def fetch_user(ip, label, t):
     try:
-        result = subprocess.run(
-            ["query", "user", f"/server:{ip}"],
-            capture_output=True, text=True, timeout=8)
+        result = _run_hidden(
+            ["query", "user", f"/server:{ip}"], timeout=8)
         output = result.stdout.strip()
         if result.returncode != 0 or not output:
             stderr = result.stderr.strip().lower()
@@ -482,11 +520,10 @@ def fetch_user(ip, label, t):
 # ── fetch: printers ───────────────────────────────────────────────────────────
 def fetch_printers(ip, tree_widget, status_lbl, t):
     try:
-        result = subprocess.run(
+        result = _run_hidden(
             ["wmic", f"/node:{ip}", "printer", "get",
              "Name,PortName,Default,WorkOffline"],
-            capture_output=True, text=True, timeout=15,
-            encoding="utf-8", errors="replace")
+            timeout=15, encoding="utf-8", errors="replace")
 
         lines = [l.rstrip() for l in result.stdout.splitlines()]
         lines = [l.lstrip('\ufeff') for l in lines if l.strip()]
@@ -551,9 +588,8 @@ def fetch_system_info(ip, text_widget, status_lbl, t):
 
     def run_wmic_simple(args, skip_headers):
         try:
-            r = subprocess.run(["wmic", f"/node:{ip}"] + args,
-                               capture_output=True, text=True, timeout=12,
-                               encoding="utf-8", errors="replace")
+            r = _run_hidden(["wmic", f"/node:{ip}"] + args,
+                            timeout=12, encoding="utf-8", errors="replace")
             lines = [l.strip().lstrip('\ufeff') for l in r.stdout.splitlines()
                      if l.strip() and not any(
                          l.strip().lstrip('\ufeff').startswith(h) for h in skip_headers)]
@@ -575,11 +611,10 @@ def fetch_system_info(ip, text_widget, status_lbl, t):
     # ── CPU ───────────────────────────────────────────────────────────────────
     cpu_info = "N/A"
     try:
-        r = subprocess.run(
+        r = _run_hidden(
             ["wmic", f"/node:{ip}", "cpu", "get",
              "Name,NumberOfCores,MaxClockSpeed"],
-            capture_output=True, text=True, timeout=12,
-            encoding="utf-8", errors="replace")
+            timeout=12, encoding="utf-8", errors="replace")
         lines = [l.rstrip() for l in r.stdout.splitlines()]
         lines = [l.lstrip('\ufeff') for l in lines if l.strip()]
         header = next((l for l in lines if "Name" in l and "NumberOfCores" in l), None)
@@ -587,16 +622,7 @@ def fetch_system_info(ip, text_widget, status_lbl, t):
             header_idx   = lines.index(header)
             col_mhz      = header.index("MaxClockSpeed")
             col_cores    = header.index("NumberOfCores")
-            # Name — после всех остальных колонок (wmic сортирует по алфавиту)
-            # MaxClockSpeed < Name < NumberOfCores в алфавитном порядке
-            # Поэтому Name идёт между MaxClockSpeed и NumberOfCores
-            col_name_end = col_cores  # Name заканчивается там где начинается NumberOfCores
-            col_name     = col_mhz + len("MaxClockSpeed")
-            # Найдём точное начало Name из заголовка
-            tmp = header[:col_cores]  # берём часть до NumberOfCores
-            # Name начинается после MaxClockSpeed
             name_start = col_mhz + len("MaxClockSpeed")
-            # найдём первый непробельный символ после MaxClockSpeed
             while name_start < col_cores and header[name_start] == " ":
                 name_start += 1
             for line in lines[header_idx+1:]:
@@ -618,10 +644,9 @@ def fetch_system_info(ip, text_widget, status_lbl, t):
     # ── RAM ───────────────────────────────────────────────────────────────────
     ram_info = "N/A"
     try:
-        r = subprocess.run(
+        r = _run_hidden(
             ["wmic", f"/node:{ip}", "memorychip", "get", "Capacity"],
-            capture_output=True, text=True, timeout=12,
-            encoding="utf-8", errors="replace")
+            timeout=12, encoding="utf-8", errors="replace")
         total_bytes = 0
         for line in r.stdout.splitlines():
             line = line.strip().lstrip('\ufeff')
@@ -635,11 +660,10 @@ def fetch_system_info(ip, text_widget, status_lbl, t):
     # ── GPU ───────────────────────────────────────────────────────────────────
     gpu_info = "N/A"
     try:
-        r = subprocess.run(
+        r = _run_hidden(
             ["wmic", f"/node:{ip}", "path",
              "win32_videocontroller", "get", "Name"],
-            capture_output=True, text=True, timeout=12,
-            encoding="utf-8", errors="replace")
+            timeout=12, encoding="utf-8", errors="replace")
         for line in r.stdout.splitlines():
             line = line.strip().lstrip('\ufeff')
             if line and line != "Name":
@@ -651,11 +675,10 @@ def fetch_system_info(ip, text_widget, status_lbl, t):
     # ── диски ─────────────────────────────────────────────────────────────────
     disks_fmt = []
     try:
-        r = subprocess.run(
+        r = _run_hidden(
             ["wmic", f"/node:{ip}", "logicaldisk",
              "get", "DeviceID,FreeSpace,Size"],
-            capture_output=True, text=True, timeout=12,
-            encoding="utf-8", errors="replace")
+            timeout=12, encoding="utf-8", errors="replace")
         lines = [l.rstrip() for l in r.stdout.splitlines()]
         lines = [l.lstrip('\ufeff') for l in lines if l.strip()]
         header = None
@@ -731,11 +754,10 @@ def fetch_system_info(ip, text_widget, status_lbl, t):
 # ── fetch: services ───────────────────────────────────────────────────────────
 def fetch_services(ip, tree_widget, status_lbl, t):
     try:
-        result = subprocess.run(
+        result = _run_hidden(
             ["wmic", f"/node:{ip}", "service", "get",
              "DisplayName,Name,StartMode,State"],
-            capture_output=True, text=True, timeout=25,
-            encoding="utf-8", errors="replace")
+            timeout=25, encoding="utf-8", errors="replace")
 
         lines = [l.rstrip() for l in result.stdout.splitlines()]
         lines = [l.lstrip('\ufeff') for l in lines if l.strip()]
@@ -803,10 +825,9 @@ def fetch_services(ip, tree_widget, status_lbl, t):
 # ── fetch: installed software ─────────────────────────────────────────────────
 def fetch_software(ip, tree_widget, status_lbl, t):
     try:
-        result = subprocess.run(
+        result = _run_hidden(
             ["wmic", f"/node:{ip}", "product", "get", "Name,Version,Vendor"],
-            capture_output=True, text=True, timeout=60,
-            encoding="utf-8", errors="replace")
+            timeout=60, encoding="utf-8", errors="replace")
 
         lines = [l.rstrip() for l in result.stdout.splitlines()]
         lines = [l.lstrip('\ufeff') for l in lines if l.strip()]
@@ -863,9 +884,8 @@ def fetch_software(ip, tree_widget, status_lbl, t):
 # ── remote power ──────────────────────────────────────────────────────────────
 def remote_reboot(hostname):
     if messagebox.askyesno("Confirm Reboot", f"Reboot {hostname} now?"):
-        r = subprocess.run(
-            ["shutdown", "/r", f"/m:\\\\{hostname}", "/t", "0"],
-            capture_output=True, text=True)
+        r = _run_hidden(
+            ["shutdown", "/r", f"/m:\\\\{hostname}", "/t", "0"])
         if r.returncode == 0:
             messagebox.showinfo("Reboot", f"Reboot sent to {hostname}")
         else:
@@ -873,9 +893,8 @@ def remote_reboot(hostname):
 
 def remote_shutdown(hostname):
     if messagebox.askyesno("Confirm Shutdown", f"Shutdown {hostname} now?"):
-        r = subprocess.run(
-            ["shutdown", "/s", f"/m:\\\\{hostname}", "/t", "0"],
-            capture_output=True, text=True)
+        r = _run_hidden(
+            ["shutdown", "/s", f"/m:\\\\{hostname}", "/t", "0"])
         if r.returncode == 0:
             messagebox.showinfo("Shutdown", f"Shutdown sent to {hostname}")
         else:
@@ -1003,8 +1022,9 @@ def show_host_info(event):
                   daemon=True).start()).pack(side="left", padx=5)
     tk.Button(pr_btn, text="Open in CMD", bg=t["btn_bg"], fg=t["btn_fg"],
               font=("Segoe UI", 9), relief="flat",
-              command=lambda: os.system(
-                  f'start cmd /k "wmic /node:{ip} printer list brief & pause"')
+              command=lambda: _popen_hidden(
+                  ["cmd", "/c", "start", "cmd", "/k",
+                   f"wmic /node:{ip} printer list brief & pause"])
               ).pack(side="left", padx=5)
 
     threading.Thread(target=fetch_printers,
@@ -1215,7 +1235,7 @@ def copy_hostname():
 def rdp_connect():
     s = tree.focus()
     if s:
-        os.system(f"mstsc /v:{tree.item(s)['values'][0]}")
+        _popen_hidden(["mstsc", f"/v:{tree.item(s)['values'][0]}"])
 
 filter_var = tk.StringVar(value="ALL")
 
